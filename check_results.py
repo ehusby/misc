@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 
 # Erik Husby, 2017
 
@@ -37,7 +37,7 @@ def main():
                 #     print "(under) "+prefix_prev
                 # else:
                 #     print "( over) "+prefix_prev
-                print prefix_prev
+                print(prefix_prev)
             prefix_num = 1
         prefix_prev = prefix
         prefix = flistFile_fp.readline()[:PREFIX_END_INDEX]

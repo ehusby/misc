@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 
 import argparse
 import glob
@@ -10,7 +10,7 @@ def main():
     parser = argparse.ArgumentParser(description=(
         "Perform a command on (a subset of) files in a directory in batch."))
     parser.add_argument('src',
-        help=("Path to source directory."))
+        help="Path to source directory.")
     parser.add_argument('dst',
         help="Path to destination directory.")
     parser.add_argument('--dryrun', action='store_true', default=False,
@@ -25,7 +25,7 @@ def main():
     if not os.path.isdir(srcdir):
         parser.error("src must be a directory")
     if not os.path.isdir(dstdir):
-        print "Creating destination directory: {}".format(dstdir)
+        print("Creating destination directory: {}".format(dstdir))
         os.makedirs(dstdir)
 
     # Filter source files.
@@ -40,10 +40,10 @@ def main():
 
         # Set the path of the destination file.
         dstFile = os.path.join(dstdir, os.path.basename(srcFile))
-        
+
         # Build the command to be run.
         cmd = """mklink /h "{}" "{}" """.format(dstFile, srcFile)
-        
+
         print("({}/{}) {}".format(i, num_jobs, cmd))
 
         if not args.dryrun:

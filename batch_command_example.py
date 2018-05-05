@@ -29,7 +29,7 @@ def main():
     parser = argparse.ArgumentParser(description=(
         "Perform a command on (a subset of) files in a directory in batch."))
     parser.add_argument('src',
-        help=("Path to source directory."))
+        help="Path to source directory.")
     parser.add_argument('dst',
         help="Path to destination directory.")
     parser.add_argument('--dryrun', action='store_true', default=False,
@@ -44,7 +44,7 @@ def main():
     if not os.path.isdir(srcdir):
         parser.error("src must be a directory")
     if not os.path.isdir(dstdir):
-        print "Creating destination directory: {}".format(dstdir)
+        print("Creating destination directory: {}".format(dstdir))
         os.makedirs(dstdir)
 
     # Filter source files, usually by making use of the wildcard
@@ -62,7 +62,7 @@ def main():
         dstFile = os.path.join(dstdir, os.path.basename(srcFile))
         # A path's "basename" is the filename of the file that
         # you usually see when you browse through files on your PC.
-        
+
         # Build the command to be run.
         cmd = """mklink /h "{}" "{}" """.format(dstFile, srcFile)
         # The command I put here as an example is a Windows
@@ -73,7 +73,7 @@ def main():
         # the file data is stored on disk. After creating the
         # hard link, that data will not be deleted until both
         # the source file and the hard link file are deleted.
-        
+
         # If this script takes a while to run, it's much better
         # to be able to see what's going on than to be in the dark.
         # Make good use of print statements like these for logging.
