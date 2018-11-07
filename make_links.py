@@ -4,6 +4,7 @@
 
 
 import argparse
+import filecmp
 import glob
 import os
 import platform
