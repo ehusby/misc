@@ -85,6 +85,7 @@ default_transplant_tree = TRANSPLANT_TREE
 default_collapse_tree = COLLAPSE_TREE
 default_flist_glob = FLIST_GLOB
 default_overwrite = OVERWRITE
+default_dryrun = DRYRUN
 
 default_fprefix = FNAME_PREFIX if FNAME_PREFIX is not None and FNAME_PREFIX != '' else None
 default_dprefix = DNAME_PREFIX if DNAME_PREFIX is not None and DNAME_PREFIX != '' else None
@@ -206,13 +207,13 @@ def main():
               "*Only applies when `src` is a directory or a dir list.*".format(default_delim)
               +" (default={})".format(default_dreplace)*(default_dreplace is not None)))
 
-    parser.add_argument('--overwrite', action='store_true', default=OVERWRITE,
+    parser.add_argument('--overwrite', action='store_true', default=default_overwrite,
         help=("If a file already exists at the path where the link is to be created "
               "and it appears to `filecmp.cmp()` that the existing file is not already "
               "a link to the source file, remove the existing file and create the link."
               " (default={})".format(default_overwrite)))
 
-    parser.add_argument('--dryrun', action='store_true', default=DRYRUN,
+    parser.add_argument('--dryrun', action='store_true', default=default_dryrun,
         help="Print actions without executing.")
 
     system_choices = ('Windows', 'Linux')
@@ -222,6 +223,7 @@ def main():
                      "but detected '{}'".format(system_choices, system))
 
     global FLIST_SRCDIR, FLIST_GLOB
+    global GLOB_PREFIX, GLOB_SUFFIX
     global FLIST_PREFIX, FLIST_CONTAINS, FLIST_SUFFIX
     global FNAME_PREFIX, FNAME_CONTAINS, FNAME_SUFFIX, FNAME_REPLACE
     global DNAME_PREFIX, DNAME_CONTAINS, DNAME_SUFFIX, DNAME_REPLACE
@@ -268,6 +270,23 @@ def main():
         FLIST_CONTAINS, FNAME_CONTAINS[0] = FNAME_CONTAINS[0].split('>')
     if FNAME_SUFFIX is not None and '>' in FNAME_SUFFIX[0]:
         FLIST_SUFFIX, FNAME_SUFFIX[0] = FNAME_SUFFIX[0].split('>')
+
+    if FLIST_GLOB:
+        glob_chars = ['*', '?']
+        GLOB_PREFIX = ''
+        GLOB_SUFFIX = ''
+        if FNAME_PREFIX is not None and len(FNAME_PREFIX) == 1:
+            for char in glob_chars:
+                if char in FNAME_PREFIX[0]:
+                    GLOB_PREFIX = FNAME_PREFIX[0]
+                    FNAME_PREFIX = None
+                    break
+        if FNAME_SUFFIX is not None and len(FNAME_SUFFIX) == 1:
+            for char in glob_chars:
+                if char in FNAME_SUFFIX[0]:
+                    GLOB_SUFFIX = FNAME_SUFFIX[0]
+                    FNAME_SUFFIX = None
+                    break
 
     if FNAME_REPLACE is not None:
         for i, repl_str in enumerate(FNAME_REPLACE):
@@ -342,6 +361,7 @@ def get_cmd(systype, args):
 
 
 def link_dir(srcdir, dstdir, depth):
+
     for dirent in os.listdir(srcdir):
         main_dirent = os.path.join(srcdir, dirent)
 
@@ -392,6 +412,7 @@ def link_dir(srcdir, dstdir, depth):
 
 
 def link_flist(flist, dstdir):
+
     with open(flist, 'r') as flist_fp:
 
         for line_num, line in enumerate(flist_fp):
@@ -442,7 +463,10 @@ def link_flist(flist, dstdir):
                           "in source file list line {}: {}".format(FLIST_PREFIX, line_num+1, txt_fpath))
                     continue
                 txt_fname_suff = txt_fname[repl_index+len(FLIST_PREFIX):]
-                src_fnames = [link_pref+txt_fname_suff for link_pref in FNAME_PREFIX]
+                if FNAME_PREFIX is not None:
+                    src_fnames = [link_pref+txt_fname_suff for link_pref in FNAME_PREFIX]
+                else:
+                    src_fnames = [txt_fname_suff]
 
             elif FLIST_SUFFIX is not None:
                 repl_index = txt_fname.rfind(FLIST_SUFFIX)
@@ -451,7 +475,10 @@ def link_flist(flist, dstdir):
                           "in source file list line {}: {}".format(FLIST_SUFFIX, line_num+1, txt_fpath))
                     continue
                 txt_fname_pref = txt_fname[:repl_index]
-                src_fnames = [txt_fname_pref+link_suff for link_suff in FNAME_SUFFIX]
+                if FNAME_SUFFIX is not None:
+                    src_fnames = [txt_fname_pref+link_suff for link_suff in FNAME_SUFFIX]
+                else:
+                    src_fnames = [txt_fname_pref]
 
             elif FLIST_CONTAINS is not None:
                 src_fnames = [txt_fname.replace(FLIST_CONTAINS, link_cont) for link_cont in FNAME_CONTAINS]
@@ -460,12 +487,13 @@ def link_flist(flist, dstdir):
                 src_fnames = [txt_fname]
 
             if FLIST_GLOB or EXCLUDE_FPATHS is not None:
-                src_files = [os.path.join(txt_dpath, fname) for fname in src_fnames]
                 if FLIST_GLOB:
                     src_files_glob = []
-                    for file_pattern in src_files:
+                    for file_pattern in [os.path.join(txt_dpath, GLOB_PREFIX+fname+GLOB_SUFFIX) for fname in src_fnames]:
                         src_files_glob.extend(glob.glob(file_pattern))
                     src_files = src_files_glob
+                else:
+                    src_files = [os.path.join(txt_dpath, fname) for fname in src_fnames]
                 if EXCLUDE_FPATHS is not None:
                     src_files = [f for f in src_files if f not in EXCLUDE_FPATHS]
                 src_fnames = [os.path.basename(f) for f in src_files]
