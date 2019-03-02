@@ -65,14 +65,16 @@ EXCLUDE_FPATHS = [
 ]
 ############################
 
-EXCLUDE_DNAMES, EXCLUDE_FNAMES, \
-EXCLUDE_DPATHS, EXCLUDE_FPATHS = [
-    os.path.abspath(os.path.expanduser(exl)) if exl != [''] else None for exl in (
+EXCLUDE_DNAMES, EXCLUDE_FNAMES = [
+    exclude_names if exclude_names != [''] else None for exclude_names in (
         EXCLUDE_DNAMES, EXCLUDE_FNAMES,
+    )
+]
+EXCLUDE_DPATHS, EXCLUDE_FPATHS = [
+    [os.path.abspath(os.path.expanduser(path)) for path in exclude_paths] if exclude_paths != [''] else None for exclude_paths in (
         EXCLUDE_DPATHS, EXCLUDE_FPATHS
     )
 ]
-
 
 default_src = SRC if SRC is not None and SRC != '' else None
 default_dstdir = DSTDIR if DSTDIR is not None and DSTDIR != '' else None
@@ -488,10 +490,13 @@ def link_flist(flist, dstdir):
 
             if FLIST_GLOB or EXCLUDE_FPATHS is not None:
                 if FLIST_GLOB:
-                    src_files_glob = []
+                    src_files = []
                     for file_pattern in [os.path.join(txt_dpath, GLOB_PREFIX+fname+GLOB_SUFFIX) for fname in src_fnames]:
-                        src_files_glob.extend(glob.glob(file_pattern))
-                    src_files = src_files_glob
+                        src_files_glob = glob.glob(file_pattern)
+                        if not src_files_glob:
+                            print("Glob for file path pattern '{}' returned 0 matching files".format(file_pattern))
+                        else:
+                            src_files.extend(src_files_glob)
                 else:
                     src_files = [os.path.join(txt_dpath, fname) for fname in src_fnames]
                 if EXCLUDE_FPATHS is not None:
