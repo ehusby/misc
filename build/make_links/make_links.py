@@ -23,6 +23,7 @@ FLIST_SUFFIX = None
 LINK_TYPE_HARDLINK = 0
 LINK_TYPE_SYMLINK = 1
 DRYRUN = False
+SILENT = False
 CMD_RAW = None
 ###########################
 
@@ -88,6 +89,7 @@ default_collapse_tree = COLLAPSE_TREE
 default_flist_glob = FLIST_GLOB
 default_overwrite = OVERWRITE
 default_dryrun = DRYRUN
+default_silent = SILENT
 
 default_fprefix = FNAME_PREFIX if FNAME_PREFIX is not None and FNAME_PREFIX != '' else None
 default_dprefix = DNAME_PREFIX if DNAME_PREFIX is not None and DNAME_PREFIX != '' else None
@@ -121,8 +123,13 @@ def main():
         help=("Path to source directory containing files to link to, "
               "or path to a text file containing a list of files to link to. "
               "If `src` is a file/dir list, these should be absolute paths unless "
-              "--flist-srcdir option is used. If `src` is a dir list, "
-              "each directory entry MUST end with a '/'."
+              "--flist-srcdir option is used. Any directory entries in this list "
+              "MUST end with a '/'. "
+              "\nThe target destination directory of a particular entry can be "
+              "specified on the same line as the source file/dir path like "
+              "'[src file/dir path]{}[dst dir path]'. [dst dir path] can be either absolute "
+              "(starts with '/' in Linux or '[A-Z]:' in Windows) or relative to the provided "
+              "`dst` destination directory.".format(default_delim)
               +" (default={})".format(default_src)*(default_src is not None)))
 
     parser.add_argument('--dst', default=default_dstdir,
@@ -215,11 +222,15 @@ def main():
               "a link to the source file, remove the existing file and create the link."
               " (default={})".format(default_overwrite)))
 
+    parser.add_argument('--silent', action='store_true', default=default_silent,
+        help="Do not print all actions.")
+
     parser.add_argument('--dryrun', action='store_true', default=default_dryrun,
         help="Print actions without executing.")
 
     system_choices = ('Windows', 'Linux')
     system = platform.system()
+    python_version = platform.python_version()
     if system not in system_choices:
         parser.error("Only supported system types are {}, "
                      "but detected '{}'".format(system_choices, system))
@@ -230,8 +241,8 @@ def main():
     global FNAME_PREFIX, FNAME_CONTAINS, FNAME_SUFFIX, FNAME_REPLACE
     global DNAME_PREFIX, DNAME_CONTAINS, DNAME_SUFFIX, DNAME_REPLACE
     global DEPTH_LIMIT, COLLAPSE_TREE
-    global CMD_RAW, OVERWRITE, DRYRUN
-    global ARGV
+    global CMD_RAW, LINK_FUNCTION, OVERWRITE, DRYRUN, VERBOSE
+    global ARGV, DELIM
 
     ARGV = sys.argv
 
@@ -265,6 +276,7 @@ def main():
         parser.error("`depth` must be 'inf' (sans quotes) or a positive integer")
     OVERWRITE = args.overwrite
     DRYRUN = args.dryrun
+    VERBOSE = (not args.silent)
 
     if FNAME_PREFIX is not None and '>' in FNAME_PREFIX[0]:
         FLIST_PREFIX, FNAME_PREFIX[0] = FNAME_PREFIX[0].split('>')
@@ -319,6 +331,16 @@ def main():
     if args.hardlink and args.symlink:
         parser.error("--hardlink and --symlink options are mutually exclusive")
 
+    LINK_FUNCTION = None
+    try:
+        if args.hardlink:
+            LINK_FUNCTION = os.link
+        elif args.symlink:
+            LINK_FUNCTION = os.symlink
+    except AttributeError:
+        print("Python built-in link function is not available "
+              "on this system ({}) and/or Python version ({})".format(system, python_version))
+        print("Falling back to external calls to system-level link command")
     # Set syntax of linking command, to be evaluated before execution.
     CMD_RAW = get_cmd(system, args)
 
@@ -346,15 +368,21 @@ def get_cmd(systype, args):
 
     if systype == 'Windows':
         if args.hardlink:
-            cmd = r"r'mklink /h {0} {1}'.format(link_dirent, main_dirent)"
+            cmd = r"r'mklink /h {0} {1}'.format(dst_file, src_file)"
         elif args.symlink:
-            cmd = r"r'mklink {0} {1}'.format(link_dirent, main_dirent)"
+            cmd = r"r'mklink {0} {1}'.format(dst_file, src_file)"
 
     elif systype == 'Linux':
         if args.hardlink:
-            cmd = r"r'ln {0} {1}'.format(main_dirent, link_dirent)"
+            cmd = r"r'ln {0} {1}'.format(src_file, dst_file)"
         elif args.symlink:
-            cmd = r"r'ln -s {0} {1}'.format(main_dirent, link_dirent)"
+            cmd = r"r'ln -s {0} {1}'.format(src_file, dst_file)"
+
+    elif LINK_FUNCTION is not None:
+        if args.hardlink:
+            cmd = r"r'Linking using built-in function: os.link({0} {1})'.format(src_file, dst_file)"
+        elif args.symlink:
+            cmd = r"r'Linking using built-in function: os.symlink({0} {1})'.format(src_file, dst_file)"
 
     else:
         raise SystemSupportError("Detected system type '{}' is not supported")
@@ -362,65 +390,86 @@ def get_cmd(systype, args):
     return cmd
 
 
+def link_file(src_file, dst_file):
+  
+    if os.path.isfile(dst_file):
+        if filecmp.cmp(src_file, dst_file):
+            if VERBOSE:
+                print("Correct link already exists: {}".format(dst_file))
+            return
+        else:
+            if VERBOSE:
+                print("File already exists, but is not the correct link and will be {}: {}".format(
+                  "overwritten" if OVERWRITE else "skipped", dst_file))
+            if OVERWRITE:
+                os.remove(dst_file)
+            else:
+                return
+
+    if LINK_FUNCTION is None or DRYRUN or VERBOSE:
+        cmd = eval(CMD_RAW)
+        if DRYRUN or VERBOSE:
+            # print(cmd)
+            print("LINKING: {} --> {}".format(src_file, dst_file))
+    if not DRYRUN:
+        if LINK_FUNCTION is not None:
+            LINK_FUNCTION(src_file, dst_file)
+        else:
+            subprocess.call(cmd, shell=True)
+
+
 def link_dir(srcdir, dstdir, depth):
 
     for dirent in os.listdir(srcdir):
-        main_dirent = os.path.join(srcdir, dirent)
+        src_dirent = os.path.join(srcdir, dirent)
 
-        name_replacements = DNAME_REPLACE if os.path.isdir(main_dirent) else FNAME_REPLACE
-        link_dirent_name = dirent
+        name_replacements = DNAME_REPLACE if os.path.isdir(src_dirent) else FNAME_REPLACE
+        dst_dirent_name = dirent
         if name_replacements is not None:
             for repl_item in name_replacements:
-                link_dirent_name = link_dirent_name.replace(repl_item[0], repl_item[1])
-        link_dirent = os.path.join(dstdir, link_dirent_name)
+                dst_dirent_name = dst_dirent_name.replace(repl_item[0], repl_item[1])
+        dst_dirent = os.path.join(dstdir, dst_dirent_name)
 
-        if os.path.isdir(main_dirent):
+        if os.path.isdir(src_dirent):
             if (    depth < DEPTH_LIMIT
                 and (EXCLUDE_DNAMES is None or dirent not in EXCLUDE_DNAMES)
-                and (EXCLUDE_DPATHS is None or main_dirent not in EXCLUDE_DPATHS)
+                and (EXCLUDE_DPATHS is None or src_dirent not in EXCLUDE_DPATHS)
                 and (DNAME_PREFIX is None or True in (dirent.startswith(dp) for dp in DNAME_PREFIX))
                 and (DNAME_CONTAINS is None or True in (dc in dirent for dc in DNAME_CONTAINS))
                 and (DNAME_SUFFIX is None or True in (dirent.endswith(ds) for ds in DNAME_SUFFIX))):
                 # The directory entry is a subdirectory to traverse.
                 if COLLAPSE_TREE:
-                    link_dirent = dstdir
-                elif not os.path.isdir(link_dirent) and not DRYRUN:
-                    os.makedirs(link_dirent)
-                link_dir(main_dirent, link_dirent, depth+1)
+                    dst_dirent = dstdir
+                elif not os.path.isdir(dst_dirent) and not DRYRUN:
+                    os.makedirs(dst_dirent)
+                link_dir(src_dirent, dst_dirent, depth+1)
 
         else:
             if (    (EXCLUDE_FNAMES is None or dirent not in EXCLUDE_FNAMES)
-                and (EXCLUDE_FPATHS is None or main_dirent not in EXCLUDE_FPATHS)
+                and (EXCLUDE_FPATHS is None or src_dirent not in EXCLUDE_FPATHS)
                 and (FNAME_PREFIX is None or True in (dirent.startswith(fp) for fp in FNAME_PREFIX))
                 and (FNAME_CONTAINS is None or True in (fc in dirent for fc in FNAME_CONTAINS))
                 and (FNAME_SUFFIX is None or True in (dirent.endswith(fs) for fs in FNAME_SUFFIX))):
                 # The directory entry is a file to link.
-                if os.path.isfile(link_dirent):
-                    if filecmp.cmp(main_dirent, link_dirent):
-                        # The correct link already exists.
-                        continue
-                    elif OVERWRITE:
-                        # Remove the existing file and establish the correct link.
-                        print("Overwriting existing file: {}".format(link_dirent))
-                        os.remove(link_dirent)
-                    else:
-                        print("Skipping existing file: {}".format(link_dirent))
-                        continue
-                cmd = eval(CMD_RAW)
-                if DRYRUN:
-                    print(cmd)
-                else:
-                    subprocess.call(cmd, shell=True)
+                link_file(src_dirent, dst_dirent)
 
 
 def link_flist(flist, dstdir):
+    dstdir_orig = dstdir
 
     with open(flist, 'r') as flist_fp:
 
         for line_num, line in enumerate(flist_fp):
-            txt_fpath = line.strip()
-            if txt_fpath == '':
+            flist_item = line.strip()
+            if flist_item == '':
                 continue
+
+            if DELIM in flist_item:
+                txt_fpath, txt_dname = [s.strip() for s in flist_item.split(DELIM)]
+                if not (txt_dname.startswith('/') or txt_dname[1] == ':'): # if path is not absolute
+                    dstdir = os.path.join(dstdir_orig, txt_dname)
+            else:
+              txt_fpath = flist_item
 
             if FLIST_SRCDIR is not None:
                 if not txt_fpath.startswith(FLIST_SRCDIR):
@@ -447,15 +496,32 @@ def link_flist(flist, dstdir):
                     src_dirs = src_dirs_glob
                     if EXCLUDE_DPATHS is not None:
                         src_dirs = [d for d in src_dirs if d not in EXCLUDE_DPATHS]
+                    if not src_dirs_glob:
+                        print("Glob for directory path pattern '{}' returned 0 matching directories".format(dir_pattern))
                 for d in src_dirs:
-                    argv_dir = list(ARGV)
-                    argv_dir[argv_dir.index('--src') + 1] = d
-                    if '--transplant-tree' not in argv_dir:
-                        argv_dir.append('--transplant-tree')
-                    cmd = '{} {}'.format(PYTHON_EXE, ' '.join(argv_dir))
-                    if DRYRUN:
-                        print(cmd)
-                    subprocess.call(cmd, shell=True)
+                    # argv_dir = list(ARGV)
+                    # argv_dir[argv_dir.index('--src') + 1] = d
+                    # argv_dir[argv_dir.index('--dst') + 1] = dstdir
+                    # if '--transplant-tree' not in argv_dir:
+                    #     argv_dir.append('--transplant-tree')
+                    # cmd = '{} {}'.format(PYTHON_EXE, ' '.join(argv_dir)) if argv_dir[0].endswith('.py') else ' '.join(argv_dir)
+                    # if DRYRUN:
+                    #     print(cmd)
+                    # subprocess.call(cmd, shell=True)
+                    if not os.path.isdir(d):
+                        print("Source file list line {}: "
+                          "Missing source directory '{}', skipping".format(line_num+1, d))
+                        continue
+                    if True: # if TRANSPLANT_TREE:
+                        link_rootdir_name = os.path.basename(os.path.abspath(d))
+                        if DNAME_REPLACE is not None:
+                            for repl_item in DNAME_REPLACE:
+                                link_rootdir_name = link_rootdir_name.replace(repl_item[0], repl_item[1])
+                        link_rootdir = os.path.join(dstdir, link_rootdir_name)
+                        if not os.path.isdir(link_rootdir) and not DRYRUN:
+                            os.makedirs(link_rootdir)
+                        dstdir = link_rootdir
+                    link_dir(d, dstdir, 0)
                 continue
 
             if FLIST_PREFIX is not None:
@@ -523,33 +589,17 @@ def link_flist(flist, dstdir):
                       "Skipping source file '{}' due to missing component".format(line_num+1, txt_fpath))
                 continue
 
-            for main_dirent in src_files:
-                if not os.path.isfile(main_dirent):
+            for src_dirent in src_files:
+                if not os.path.isfile(src_dirent):
                     continue
 
-                link_dirent_name = os.path.basename(main_dirent)
+                dst_dirent_name = os.path.basename(src_dirent)
                 if FNAME_REPLACE is not None:
                     for repl_item in FNAME_REPLACE:
-                        link_dirent_name = link_dirent_name.replace(repl_item[0], repl_item[1])
-                link_dirent = os.path.join(dstdir, link_dirent_name)
+                        dst_dirent_name = dst_dirent_name.replace(repl_item[0], repl_item[1])
+                dst_dirent = os.path.join(dstdir, dst_dirent_name)
 
-                if os.path.isfile(link_dirent):
-                    if filecmp.cmp(main_dirent, link_dirent):
-                        # The correct link already exists.
-                        continue
-                    elif OVERWRITE:
-                        # Remove the existing file and establish the correct link.
-                        print("Overwriting existing file: {}".format(link_dirent))
-                        os.remove(link_dirent)
-                    else:
-                        print("Skipping existing file: {}".format(link_dirent))
-                        continue
-
-                cmd = eval(CMD_RAW)
-                if DRYRUN:
-                    print(cmd)
-                else:
-                    subprocess.call(cmd, shell=True)
+                link_file(src_dirent, dst_dirent)
 
 
 
