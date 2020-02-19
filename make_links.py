@@ -469,7 +469,7 @@ def link_flist(flist, dstdir):
                 if not (txt_dname.startswith('/') or txt_dname[1] == ':'): # if path is not absolute
                     dstdir = os.path.join(dstdir_orig, txt_dname)
             else:
-              txt_fpath = flist_item
+                txt_fpath = flist_item
 
             if FLIST_SRCDIR is not None:
                 if not txt_fpath.startswith(FLIST_SRCDIR):
@@ -512,16 +512,17 @@ def link_flist(flist, dstdir):
                         print("Source file list line {}: "
                           "Missing source directory '{}', skipping".format(line_num+1, d))
                         continue
-                    if True: # if TRANSPLANT_TREE:
-                        link_rootdir_name = os.path.basename(os.path.abspath(d))
+                    if TRANSPLANT_TREE:
+                        link_rootdir_name = os.path.basename(os.path.normpath(os.path.abspath(d)))
                         if DNAME_REPLACE is not None:
                             for repl_item in DNAME_REPLACE:
                                 link_rootdir_name = link_rootdir_name.replace(repl_item[0], repl_item[1])
                         link_rootdir = os.path.join(dstdir, link_rootdir_name)
                         if not os.path.isdir(link_rootdir) and not DRYRUN:
                             os.makedirs(link_rootdir)
-                        dstdir = link_rootdir
-                    link_dir(d, dstdir, 0)
+                    else:
+                        link_rootdir = dstdir
+                    link_dir(d, link_rootdir, 0)
                 continue
 
             if FLIST_PREFIX is not None:
