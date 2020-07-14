@@ -26,7 +26,7 @@ class InvalidArgumentError(Exception):
         super(Exception, self).__init__(msg)
 
 
-class ArgumentPasser:
+class ArgumentPasser(object):
 
     def __init__(self, executable_path, script_path, parser, sys_argv=[''], parse=True):
         self.exe = executable_path
